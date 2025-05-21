@@ -7,8 +7,11 @@
 package ice
 
 import (
+	"context"
+	"fmt"
 	"net"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +23,158 @@ import (
 
 func optimisticAuthHandler(string, string, net.Addr) (key []byte, ok bool) {
 	return turn.GenerateAuthKey("username", "pion.ly", "password"), true
+}
+
+func passiveTCPRelayGatherAndExchangeCandidates(agentWithRelay, agentNoRelay *Agent) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	check(agentWithRelay.OnCandidate(func(candidate Candidate) {
+		if candidate == nil {
+			wg.Done()
+		}
+	}))
+
+	// This gather will create a single passive TCP relay candidate.
+	check(agentWithRelay.GatherCandidates())
+
+	var tcpCandidateCreated sync.WaitGroup
+	tcpCandidateCreated.Add(1)
+	check(agentNoRelay.OnCandidate(func(candidate Candidate) {
+		if candidate == nil {
+			wg.Done()
+		} else {
+			if candidate.TCPType() != TCPTypeUnspecified {
+				tcpCandidateCreated.Done()
+			}
+		}
+	}))
+
+	// Wait for `agentWithRelay` to gather its candidate. We do not need to gather candidates for
+	// `agentNoRelay`. It will create a candidate in response to receiving a passive TCP candidate.
+	wg.Wait()
+
+	// Communicate the relay candidate to `agentNoRelay`.
+	relayCandidates, err := agentWithRelay.GetLocalCandidates()
+	check(err)
+	for _, relayCandidate := range relayCandidates {
+		candidateCopy, copyErr := relayCandidate.copy()
+		check(copyErr)
+		check(agentNoRelay.AddRemoteCandidate(candidateCopy))
+	}
+
+	// Wait for the TCP candidate to be generated.
+	tcpCandidateCreated.Wait()
+
+	// Assert there's a single tcp candidate. And add it as a remote candidate for `agentWithRelay`.
+	tcpCandidates, err := agentNoRelay.GetLocalCandidates()
+	check(err)
+	if len(tcpCandidates) != 1 {
+		check(fmt.Errorf("Expected 1 TCP candidate. Found: %d", len(tcpCandidates)))
+	}
+
+	for _, c := range tcpCandidates {
+		candidateCopy, copyErr := c.copy()
+		check(copyErr)
+		check(agentWithRelay.AddRemoteCandidate(candidateCopy))
+	}
+}
+
+func passiveTCPRelayConnect(aAgent, bAgent *Agent) (*Conn, *Conn) {
+	passiveTCPRelayGatherAndExchangeCandidates(aAgent, bAgent)
+
+	accepted := make(chan struct{})
+	var aConn *Conn
+
+	go func() {
+		var acceptErr error
+		bUfrag, bPwd, acceptErr := bAgent.GetLocalUserCredentials()
+		check(acceptErr)
+		aConn, acceptErr = aAgent.Accept(context.TODO(), bUfrag, bPwd)
+		check(acceptErr)
+		close(accepted)
+	}()
+	aUfrag, aPwd, err := aAgent.GetLocalUserCredentials()
+	check(err)
+	bConn, err := bAgent.Dial(context.TODO(), aUfrag, aPwd)
+	check(err)
+
+	// Ensure accepted
+	<-accepted
+	return aConn, bConn
+}
+
+func TestRelayTCPConnection(t *testing.T) {
+	// Standup coturn:
+	//  /bin/turnserver -v -lt-cred-mech -u dan:dan -r pion.ly --allow-loopback-peers --cli-password=pw
+	//
+	// We create an ICE Agent that will create a single passive TCP relay candidate. A TURN server
+	// that supports TCP allocations must be running locally on port 3478.
+	cfgWithTURN := &AgentConfig{
+		NetworkTypes: []NetworkType{NetworkTypeTCP4},
+		Urls: []*stun.URI{
+			{
+				Scheme:   stun.SchemeTypeTURN,
+				Host:     "127.0.0.1",
+				Username: "dan",
+				Password: "dan",
+				Port:     3478,
+				Proto:    stun.ProtoTypeTCP,
+			},
+		},
+		CandidateTypes: []CandidateType{CandidateTypeRelay},
+
+		// Without this, ICE will create a TCP connection to the TURN server (as per the `Proto:
+		// ProtoTypeTCP`), but ask for a UDP allocation.
+		UseTCPAllocationsForLocalRelayCandidates: true,
+	}
+
+	agentWithTURN, err := NewAgent(cfgWithTURN)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a channel that's closed when `agentWithRelay` goes into a connected state.
+	aNotifier, aConnected := onConnected()
+	if err = agentWithTURN.OnConnectionStateChange(aNotifier); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a second agent that is capable of creating TCP candidates. The candidates will be
+	// generated in response to a passive TCP remote candidate.
+	cfgNoTURN := &AgentConfig{
+		NetworkTypes: []NetworkType{NetworkTypeTCP4},
+
+		// Explicitly demonstrate we do not need to generate any local candidates at the gathering
+		// step.
+		CandidateTypes: []CandidateType{},
+
+		// For simplicity/minimizing noise, we only want to create a localhost candidate.
+		IncludeLoopback: true,
+		IPFilter: func(addr net.IP) bool {
+			return addr.IsLoopback()
+		},
+	}
+
+	agentNoTURN, err := NewAgent(cfgNoTURN)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a channel that's closed when `agentNoTURN` goes into a connected state.
+	bNotifier, bConnected := onConnected()
+	if err = agentNoTURN.OnConnectionStateChange(bNotifier); err != nil {
+		t.Fatal(err)
+	}
+
+	// Kick off the agents and perform signaling/answering.
+	passiveTCPRelayConnect(agentWithTURN, agentNoTURN)
+
+	<-aConnected
+	<-bConnected
+
+	assert.NoError(t, agentWithTURN.Close())
+	assert.NoError(t, agentNoTURN.Close())
 }
 
 func TestRelayOnlyConnection(t *testing.T) {

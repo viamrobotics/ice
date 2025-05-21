@@ -322,6 +322,7 @@ func TestCandidateMarshal(t *testing.T) {
 				},
 				"",
 				nil,
+				nil,
 			},
 			"848194626 1 udp 16777215 50.0.0.1 5000 typ relay raddr 192.168.0.1 rport 5001",
 			false,
@@ -368,6 +369,24 @@ func TestCandidateMarshal(t *testing.T) {
 			" 1 udp 500 127.0.0.1 80 typ host",
 			false,
 		},
+		{
+			&CandidateRelay{
+				candidateBase: candidateBase{
+					networkType:   NetworkTypeTCP4,
+					candidateType: CandidateTypeRelay,
+					address:       "33.4.6.185",
+					port:          49941,
+					relatedAddress: &CandidateRelatedAddress{
+						Address: "10.1.4.198",
+						Port:    44444,
+					},
+					tcpType: TCPTypePassive,
+				},
+				relayProtocol: "tcp",
+			},
+			"536268829 1 tcp 16777215 33.4.6.185 49941 typ relay raddr 10.1.4.198 rport 44444 tcptype passive",
+			false,
+		},
 
 		// Invalid candidates
 		{nil, "", true},
@@ -391,7 +410,8 @@ func TestCandidateMarshal(t *testing.T) {
 
 		assert.NoError(t, err)
 
-		assert.Truef(t, test.candidate.Equal(actualCandidate), "%s != %s", test.candidate.String(), actualCandidate.String())
+		assert.Truef(t, test.candidate.Equal(actualCandidate), "%q != %q",
+			test.candidate.Marshal(), actualCandidate.Marshal())
 		assert.Equal(t, test.marshaled, actualCandidate.Marshal())
 	}
 }

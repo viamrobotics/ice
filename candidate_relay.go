@@ -5,29 +5,34 @@ package ice
 
 import (
 	"net"
+
+	"github.com/pion/turn/v2"
 )
 
 // CandidateRelay ...
 type CandidateRelay struct {
 	candidateBase
 
-	relayProtocol string
-	onClose       func() error
+	relayProtocol   string
+	turnControlConn *turn.Client
+	onClose         func() error
 }
 
 // CandidateRelayConfig is the config required to create a new CandidateRelay
 type CandidateRelayConfig struct {
-	CandidateID   string
-	Network       string
-	Address       string
-	Port          int
-	Component     uint16
-	Priority      uint32
-	Foundation    string
-	RelAddr       string
-	RelPort       int
-	RelayProtocol string
-	OnClose       func() error
+	CandidateID     string
+	Network         string
+	Address         string
+	Port            int
+	Component       uint16
+	Priority        uint32
+	Foundation      string
+	RelAddr         string
+	RelPort         int
+	RelayProtocol   string
+	TURNControlConn *turn.Client
+	TCPType         TCPType
+	OnClose         func() error
 }
 
 // NewCandidateRelay creates a new relay candidate
@@ -48,6 +53,13 @@ func NewCandidateRelay(config *CandidateRelayConfig) (*CandidateRelay, error) {
 		return nil, err
 	}
 
+	var resolvedAddr net.Addr
+	if networkType.IsUDP() {
+		resolvedAddr = net.Addr(&net.UDPAddr{IP: ip, Port: config.Port})
+	} else if networkType.IsTCP() {
+		resolvedAddr = &net.TCPAddr{IP: ip, Port: config.Port}
+	}
+
 	return &CandidateRelay{
 		candidateBase: candidateBase{
 			id:                 candidateID,
@@ -55,7 +67,7 @@ func NewCandidateRelay(config *CandidateRelayConfig) (*CandidateRelay, error) {
 			candidateType:      CandidateTypeRelay,
 			address:            config.Address,
 			port:               config.Port,
-			resolvedAddr:       &net.UDPAddr{IP: ip, Port: config.Port},
+			resolvedAddr:       resolvedAddr,
 			component:          config.Component,
 			foundationOverride: config.Foundation,
 			priorityOverride:   config.Priority,
@@ -64,9 +76,11 @@ func NewCandidateRelay(config *CandidateRelayConfig) (*CandidateRelay, error) {
 				Port:    config.RelPort,
 			},
 			remoteCandidateCaches: map[AddrPort]Candidate{},
+			tcpType:               config.TCPType,
 		},
-		relayProtocol: config.RelayProtocol,
-		onClose:       config.OnClose,
+		relayProtocol:   config.RelayProtocol,
+		turnControlConn: config.TURNControlConn,
+		onClose:         config.OnClose,
 	}, nil
 }
 
@@ -112,4 +126,9 @@ func (c *CandidateRelay) copy() (Candidate, error) {
 	}
 
 	return cc, nil
+}
+
+// CreatePermission
+func (c *CandidateRelay) CreatePermission(peerAddr net.Addr) error {
+	return c.turnControlConn.CreatePermission(peerAddr)
 }

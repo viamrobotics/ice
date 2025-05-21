@@ -454,7 +454,8 @@ func removeZoneIDFromAddress(addr string) string {
 	return addr
 }
 
-// Marshal returns the string representation of the ICECandidate
+// Marshal returns the string representation of the ICECandidate. For TCP Candidate `Marshal`ing,
+// see: https://datatracker.ietf.org/doc/html/rfc6544#section-4.5
 func (c *candidateBase) Marshal() string {
 	val := c.Foundation()
 	if val == " " {
@@ -470,15 +471,15 @@ func (c *candidateBase) Marshal() string {
 		c.Port(),
 		c.Type())
 
-	if c.tcpType != TCPTypeUnspecified {
-		val += fmt.Sprintf(" tcptype %s", c.tcpType.String())
-	}
-
 	if r := c.RelatedAddress(); r != nil && r.Address != "" && r.Port != 0 {
 		val = fmt.Sprintf("%s raddr %s rport %d",
 			val,
 			r.Address,
 			r.Port)
+	}
+
+	if c.tcpType != TCPTypeUnspecified {
+		val += fmt.Sprintf(" tcptype %s", c.tcpType.String())
 	}
 
 	return val
@@ -547,7 +548,10 @@ func UnmarshalCandidate(raw string) (Candidate, error) {
 				return nil, fmt.Errorf("%w: %v", errParsePort, parseErr) //nolint:errorlint
 			}
 			relatedPort = int(rawRelatedPort)
-		} else if split[0] == "tcptype" {
+			split = split[4:]
+		}
+
+		if len(split) > 0 && split[0] == "tcptype" {
 			if len(split) < 2 {
 				return nil, fmt.Errorf("%w: incorrect length", errParseTCPType)
 			}
@@ -564,7 +568,7 @@ func UnmarshalCandidate(raw string) (Candidate, error) {
 	case "prflx":
 		return NewCandidatePeerReflexive(&CandidatePeerReflexiveConfig{"", protocol, address, port, component, priority, foundation, relatedAddress, relatedPort})
 	case "relay":
-		return NewCandidateRelay(&CandidateRelayConfig{"", protocol, address, port, component, priority, foundation, relatedAddress, relatedPort, "", nil})
+		return NewCandidateRelay(&CandidateRelayConfig{"", protocol, address, port, component, priority, foundation, relatedAddress, relatedPort, "", nil, tcpType, nil})
 	default:
 	}
 
