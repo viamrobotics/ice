@@ -684,8 +684,9 @@ func (a *Agent) createPassiveTCPRelayCandidate(
 		return
 	}
 
-	// Opt to let pion handle in bound messages to the control connection. And inform us
-	// via channel events we can react to, e.g: `TCPAllocation.AcceptTCPWithConn`.
+	// Opt to let pion handle in bound messages to the control connection. And inform us via channel
+	// events we can react to. For example, `BindIndication` messages from the relay will write an
+	// event to a channel that `TCPAllocation.AcceptTCPWithConn` pulls from.
 	if err = client.Listen(); err != nil {
 		client.Close()
 		closeConnAndLog(locConn, a.log, "failed to listen on TURN client %s %s", turnServerAddr, err)
@@ -701,6 +702,15 @@ func (a *Agent) createPassiveTCPRelayCandidate(
 		return
 	}
 
+	// This `dataConn` is a wrapper for the "data" relay connection we will send/receive data to on
+	// behalf of communicating with a peer.
+	//
+	// Pion uses `net.PacketConn` as the base level for sending data between
+	// peers/relays. PacketConns are unfortunately a UDP abstraction. Therefore pion also has a
+	// `tcpPacketConn` for turning a `net.Conn` into a `net.PacketConn`.
+	//
+	// These `tcpPacketConn`s internally keep a map of TCP connections. We'll only create one entry
+	// in this map (first "caller" wins).
 	dataConn := newTCPPacketConn(tcpPacketParams{
 		ReadBuffer:  1024, // Number of packets?
 		LocalAddr:   locConn.LocalAddr(),
@@ -709,11 +719,14 @@ func (a *Agent) createPassiveTCPRelayCandidate(
 	})
 
 	go func() {
+		// Wait for a `BindIndication`. And follow that by issuing a `ConnectionBind`
+		// request. Returning the `tcpConn` we can to plain old reads/writes.
 		tcpConn, err := relayAllocation.AcceptTCP()
 		if err != nil {
 			panic(err)
 		}
 
+		// Add the minted `tcpConn` to the `dataConn` that the relay candidate will be mapped to.
 		dataConn.AddConn(tcpConn, nil)
 	}()
 
@@ -736,7 +749,11 @@ func (a *Agent) createPassiveTCPRelayCandidate(
 		RelAddr:         relatedAddr,
 		RelPort:         relatedPort,
 		TURNControlConn: client,
-		TCPType:         TCPTypePassive,
+		// Dan: We force TCPTypePassive here by choice. Maybe SimultaneousOpen is valid as well? We
+		// certainly expect to only succeed via the other peer dialing out to the relay. But if we
+		// have firewall/nat limitations on the TURN server, simultaneous open may have an
+		// advantage? Can certainly experiment here at a later date.
+		TCPType: TCPTypePassive,
 		OnClose: func() error {
 			relayAllocation.Close()
 			client.Close()
