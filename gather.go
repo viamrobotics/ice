@@ -659,7 +659,7 @@ func (a *Agent) gatherCandidatesRelay(ctx context.Context, urls []*stun.URI) { /
 
 			// String match. Careful about tcp4 and tcp6 values
 			if relayProtocol == tcp && a.useTCPAllocationsForLocalRelayCandidates {
-				a.createPassiveTCPRelayCandidate(ctx, network, turnServerAddr, locConn, url, relatedAddr, relatedPort)
+				a.createPassiveTCPRelayCandidate(ctx, network, turnServerAddr, locConn, url, relatedAddr, relatedPort, relayProtocol)
 			} else {
 				a.createUDPRelayCandidate(ctx, network, turnServerAddr, locConn, url, relatedAddr, relatedPort, relayProtocol)
 			}
@@ -669,7 +669,7 @@ func (a *Agent) gatherCandidatesRelay(ctx context.Context, urls []*stun.URI) { /
 
 func (a *Agent) createPassiveTCPRelayCandidate(
 	ctx context.Context, network, turnServerAddr string, locConn net.PacketConn, url stun.URI,
-	relatedAddr string, relatedPort int) {
+	relatedAddr string, relatedPort int, relayProtocol string) {
 
 	client, err := turn.NewClient(&turn.ClientConfig{
 		TURNServerAddr: turnServerAddr,
@@ -753,7 +753,8 @@ func (a *Agent) createPassiveTCPRelayCandidate(
 		// certainly expect to only succeed via the other peer dialing out to the relay. But if we
 		// have firewall/nat limitations on the TURN server, simultaneous open may have an
 		// advantage? Can certainly experiment here at a later date.
-		TCPType: TCPTypePassive,
+		TCPType:       TCPTypePassive,
+		RelayProtocol: relayProtocol,
 		OnClose: func() error {
 			relayAllocation.Close()
 			client.Close()
