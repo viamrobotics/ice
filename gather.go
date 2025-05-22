@@ -753,7 +753,8 @@ func (a *Agent) createPassiveTCPRelayCandidate(
 		// certainly expect to only succeed via the other peer dialing out to the relay. But if we
 		// have firewall/nat limitations on the TURN server, simultaneous open may have an
 		// advantage? Can certainly experiment here at a later date.
-		TCPType: TCPTypePassive,
+		TCPType:       TCPTypePassive,
+		RelayProtocol: tcp,
 		OnClose: func() error {
 			relayAllocation.Close()
 			client.Close()
