@@ -1000,7 +1000,7 @@ func (a *Agent) findRemoteCandidate(networkType NetworkType, addr net.Addr) Cand
 }
 
 func (a *Agent) sendBindingRequest(m *stun.Message, local, remote Candidate) {
-	a.log.Tracef("Ping STUN from %s to %s", local, remote)
+	a.log.Tracef("Ping STUN from %s to %s (Transaction ID: %v)", local, remote, m.TransactionID)
 
 	a.invalidatePendingBindingRequests(time.Now())
 	a.pendingBindingRequests = append(a.pendingBindingRequests, bindingRequest{
@@ -1088,15 +1088,21 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 
 	if a.isControlling {
 		if m.Contains(stun.AttrICEControlling) {
-			a.log.Debug("Inbound STUN message: isControlling && a.isControlling == true")
+			a.log.Debugf(
+				"Inbound STUN message: isControlling && a.isControlling == true (Transaction ID: %v)",
+				m.TransactionID,
+			)
 			return
 		} else if m.Contains(stun.AttrUseCandidate) {
-			a.log.Debug("Inbound STUN message: useCandidate && a.isControlling == true")
+			a.log.Debugf(
+				"Inbound STUN message: useCandidate && a.isControlling == true (Transaction ID: %v)",
+				m.TransactionID,
+			)
 			return
 		}
 	} else {
 		if m.Contains(stun.AttrICEControlled) {
-			a.log.Debug("Inbound STUN message: isControlled && a.isControlling == false")
+			a.log.Debugf("Inbound STUN message: isControlled && a.isControlling == false (Transaction ID: %v)", m.TransactionID)
 			return
 		}
 	}
@@ -1115,7 +1121,8 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 
 		a.selector.HandleSuccessResponse(m, local, remoteCandidate, remote)
 	} else if m.Type.Class == stun.ClassRequest {
-		a.log.Tracef("Inbound STUN (Request) from %s to %s, useCandidate: %v", remote, local, m.Contains(stun.AttrUseCandidate))
+		a.log.Tracef("Inbound STUN (Request) from %s to %s, useCandidate: %v (Transaction ID: %v)",
+			remote, local, m.Contains(stun.AttrUseCandidate), m.TransactionID)
 
 		if err = stunx.AssertUsername(m, a.localUfrag+":"+a.remoteUfrag); err != nil {
 			a.log.Warnf("Discard message from (%s), %v", remote, err)
