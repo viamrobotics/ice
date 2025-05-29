@@ -4,6 +4,7 @@
 package ice
 
 import (
+	"encoding/base64"
 	"net"
 	"time"
 
@@ -87,7 +88,9 @@ func (s *controllingSelector) nominatePair(pair *CandidatePair) {
 		return
 	}
 
-	s.log.Tracef("Ping STUN (nominate candidate pair) from %s to %s", pair.Local, pair.Remote)
+	encodedTransactionID := base64.StdEncoding.EncodeToString(msg.TransactionID[:])
+	s.log.Tracef("Ping STUN (nominate candidate pair) from %s to %s (Transaction ID: %s)",
+		pair.Local, pair.Remote, encodedTransactionID)
 	s.agent.sendBindingRequest(msg, pair.Local, pair.Remote)
 }
 
@@ -135,7 +138,9 @@ func (s *controllingSelector) HandleSuccessResponse(m *stun.Message, local, remo
 		return
 	}
 
-	s.log.Tracef("Inbound STUN (SuccessResponse) from %s to %s", remote, local)
+	encodedTransactionID := base64.StdEncoding.EncodeToString(m.TransactionID[:])
+	s.log.Tracef("Inbound STUN (SuccessResponse) from %s to %s (Transaction ID: %s)", remote, local,
+		encodedTransactionID)
 	p := s.agent.findPair(local, remote)
 
 	if p == nil {
@@ -228,7 +233,9 @@ func (s *controlledSelector) HandleSuccessResponse(m *stun.Message, local, remot
 		return
 	}
 
-	s.log.Tracef("Inbound STUN (SuccessResponse) from %s to %s", remote, local)
+	encodedTransactionID := base64.StdEncoding.EncodeToString(m.TransactionID[:])
+	s.log.Tracef("Inbound STUN (SuccessResponse) from %s to %s (Transaction ID: %s)", remote, local,
+		encodedTransactionID)
 
 	p := s.agent.findPair(local, remote)
 	if p == nil {

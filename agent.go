@@ -7,6 +7,7 @@ package ice
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"math"
@@ -1000,7 +1001,8 @@ func (a *Agent) findRemoteCandidate(networkType NetworkType, addr net.Addr) Cand
 }
 
 func (a *Agent) sendBindingRequest(m *stun.Message, local, remote Candidate) {
-	a.log.Tracef("Ping STUN from %s to %s", local, remote)
+	encodedTransactionID := base64.StdEncoding.EncodeToString(m.TransactionID[:])
+	a.log.Tracef("Ping STUN from %s to %s (Transaction ID: %s)", local, remote, encodedTransactionID)
 
 	a.invalidatePendingBindingRequests(time.Now())
 	a.pendingBindingRequests = append(a.pendingBindingRequests, bindingRequest{
@@ -1086,20 +1088,32 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 		return
 	}
 
+	var isICEControlling, isUseCandidate, isICEControlled bool
 	if a.isControlling {
 		if m.Contains(stun.AttrICEControlling) {
-			a.log.Debug("Inbound STUN message: isControlling && a.isControlling == true")
-			return
+			isICEControlling = true
 		} else if m.Contains(stun.AttrUseCandidate) {
-			a.log.Debug("Inbound STUN message: useCandidate && a.isControlling == true")
-			return
+			isUseCandidate = true
 		}
 	} else {
 		if m.Contains(stun.AttrICEControlled) {
-			a.log.Debug("Inbound STUN message: isControlled && a.isControlling == false")
-			return
+			isICEControlled = true
 		}
 	}
+
+	encodedTransactionID := base64.StdEncoding.EncodeToString(m.TransactionID[:])
+	a.log.Debugf(
+		"Inbound STUN message. From: (%s) To: (%s) Method: (%s) Class: (%s) ICEControlling: (%v) UseCandidate: (%v) ICEControlled: (%v) a.isControlling: (%v) TransactionID: (%s)",
+		remote,
+		local,
+		m.Type.Method,
+		m.Type.Class,
+		isICEControlling,
+		isUseCandidate,
+		isICEControlled,
+		a.isControlling,
+		encodedTransactionID,
+	)
 
 	remoteCandidate := a.findRemoteCandidate(local.NetworkType(), remote)
 	if m.Type.Class == stun.ClassSuccessResponse {
@@ -1115,8 +1129,6 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 
 		a.selector.HandleSuccessResponse(m, local, remoteCandidate, remote)
 	} else if m.Type.Class == stun.ClassRequest {
-		a.log.Tracef("Inbound STUN (Request) from %s to %s, useCandidate: %v", remote, local, m.Contains(stun.AttrUseCandidate))
-
 		if err = stunx.AssertUsername(m, a.localUfrag+":"+a.remoteUfrag); err != nil {
 			a.log.Warnf("Discard message from (%s), %v", remote, err)
 			return
