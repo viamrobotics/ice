@@ -209,7 +209,7 @@ type AgentConfig struct {
 	// data from this connection.
 	//
 	// There are three ways for a TURN client to communicate with a TURN server:
-	// - Send/Receive UDP packets to both the turn server over both the "control" and "data"
+	// - Send/Receive UDP packets to the turn server over both the "control" and "data"
 	//   connection.
 	// - Send/Receive TCP packets over the "control" connection and UDP packets over the "data"
 	//   connection.
