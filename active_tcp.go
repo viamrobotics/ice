@@ -133,18 +133,6 @@ func newActiveTCPConn(ctx context.Context, localAddress, remoteAddress string, l
 					(*connPtr).Close()
 				}
 
-				// Dan: Allow the OS to create a new local address/port for the redial attempt. It's
-				// unclear why this is necessary, given we've just closed the prior connection using
-				// that port. But removing this line results in `TestRelayTCPConnection` to
-				// deterministically fail on linux 5.15.0-135-generic with go1.23.2.
-				//
-				// What I am seeing is that we continue to get "broken pipe" errors, despite a
-				// successful connection from the TURN server + TURN client perspective (a
-				// connection indication successfully goes through).
-				//
-				// As per the reasoning above re: `localAddress`, I feel this is safe as active tcp
-				// connections do not accept incoming connection attempts.
-				dialer.LocalAddr = nil
 				newConn, err := dialer.DialContext(ctx, "tcp", remoteAddress)
 				if err != nil {
 					log.Infof("Failed to dial TCP address %s: %v", remoteAddress, err)
