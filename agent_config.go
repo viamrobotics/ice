@@ -202,6 +202,26 @@ type AgentConfig struct {
 	// switched to that irrespective of relative priority between current selected pair
 	// and priority of the pair being switched to.
 	EnableUseCandidateCheckPriority bool
+
+	// Introduction: The TURN protocol describes two connections. A "control" connection to the TURN
+	// server where credentials are passed and commands (e.g: to allocate a relay) are sent. And a
+	// "data" connection. When a relay is allocated, a TURN client will send/receive peerconnection
+	// data from this connection.
+	//
+	// There are three ways for a TURN client to communicate with a TURN server:
+	// - Send/Receive UDP packets to the turn server over both the "control" and "data"
+	//   connection.
+	// - Send/Receive TCP packets over the "control" connection and UDP packets over the "data"
+	//   connection.
+	// - Send/Receive TCP packets over both the "control" and "data" connection.
+	//
+	// If `UseTCPAllocationsForLocalRelayCandidates` is false, the data connection will always send
+	// UDP packets. And the "turn protocol" (defined in the `stun.URI` config) dictates the
+	// "control" connection type.
+	//
+	// If `UseTCPAllocationsForLocalRelayCandidates` is true (in addition to using the TCP protocol
+	// in the `stun.URI`), we will attempt to use TCP connections for the "data" channel.
+	UseTCPAllocationsForLocalRelayCandidates bool
 }
 
 // initWithDefaults populates an agent and falls back to defaults if fields are unset

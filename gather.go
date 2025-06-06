@@ -543,8 +543,8 @@ func (a *Agent) gatherCandidatesRelay(ctx context.Context, urls []*stun.URI) { /
 			var (
 				locConn       net.PacketConn
 				err           error
-				relAddr       string
-				relPort       int
+				relatedAddr   string
+				relatedPort   int
 				relayProtocol string
 			)
 
@@ -555,19 +555,20 @@ func (a *Agent) gatherCandidatesRelay(ctx context.Context, urls []*stun.URI) { /
 					return
 				}
 
-				relAddr = locConn.LocalAddr().(*net.UDPAddr).IP.String() //nolint:forcetypeassert
-				relPort = locConn.LocalAddr().(*net.UDPAddr).Port        //nolint:forcetypeassert
+				relatedAddr = locConn.LocalAddr().(*net.UDPAddr).IP.String() //nolint:forcetypeassert
+				relatedPort = locConn.LocalAddr().(*net.UDPAddr).Port        //nolint:forcetypeassert
 				relayProtocol = udp
 			case a.proxyDialer != nil && url.Proto == stun.ProtoTypeTCP &&
 				(url.Scheme == stun.SchemeTypeTURN || url.Scheme == stun.SchemeTypeTURNS):
+				network = NetworkTypeTCP4.String()
 				conn, connectErr := a.proxyDialer.Dial(NetworkTypeTCP4.String(), turnServerAddr)
 				if connectErr != nil {
 					a.log.Warnf("Failed to dial TCP address %s via proxy dialer: %v", turnServerAddr, connectErr)
 					return
 				}
 
-				relAddr = conn.LocalAddr().(*net.TCPAddr).IP.String() //nolint:forcetypeassert
-				relPort = conn.LocalAddr().(*net.TCPAddr).Port        //nolint:forcetypeassert
+				relatedAddr = conn.LocalAddr().(*net.TCPAddr).IP.String() //nolint:forcetypeassert
+				relatedPort = conn.LocalAddr().(*net.TCPAddr).Port        //nolint:forcetypeassert
 				if url.Scheme == stun.SchemeTypeTURN {
 					relayProtocol = tcp
 				} else if url.Scheme == stun.SchemeTypeTURNS {
@@ -576,6 +577,7 @@ func (a *Agent) gatherCandidatesRelay(ctx context.Context, urls []*stun.URI) { /
 				locConn = turn.NewSTUNConn(conn)
 
 			case url.Proto == stun.ProtoTypeTCP && url.Scheme == stun.SchemeTypeTURN:
+				network = NetworkTypeTCP4.String()
 				tcpAddr, connectErr := a.net.ResolveTCPAddr(NetworkTypeTCP4.String(), turnServerAddr)
 				if connectErr != nil {
 					a.log.Warnf("Failed to resolve TCP address %s: %v", turnServerAddr, connectErr)
@@ -588,10 +590,11 @@ func (a *Agent) gatherCandidatesRelay(ctx context.Context, urls []*stun.URI) { /
 					return
 				}
 
-				relAddr = conn.LocalAddr().(*net.TCPAddr).IP.String() //nolint:forcetypeassert
-				relPort = conn.LocalAddr().(*net.TCPAddr).Port        //nolint:forcetypeassert
+				relatedAddr = conn.LocalAddr().(*net.TCPAddr).IP.String() //nolint:forcetypeassert
+				relatedPort = conn.LocalAddr().(*net.TCPAddr).Port        //nolint:forcetypeassert
 				relayProtocol = tcp
 				locConn = turn.NewSTUNConn(conn)
+
 			case url.Proto == stun.ProtoTypeUDP && url.Scheme == stun.SchemeTypeTURNS:
 				udpAddr, connectErr := a.net.ResolveUDPAddr(network, turnServerAddr)
 				if connectErr != nil {
@@ -614,11 +617,12 @@ func (a *Agent) gatherCandidatesRelay(ctx context.Context, urls []*stun.URI) { /
 					return
 				}
 
-				relAddr = conn.LocalAddr().(*net.UDPAddr).IP.String() //nolint:forcetypeassert
-				relPort = conn.LocalAddr().(*net.UDPAddr).Port        //nolint:forcetypeassert
+				relatedAddr = conn.LocalAddr().(*net.UDPAddr).IP.String() //nolint:forcetypeassert
+				relatedPort = conn.LocalAddr().(*net.UDPAddr).Port        //nolint:forcetypeassert
 				relayProtocol = relayProtocolDTLS
 				locConn = &fakenet.PacketConn{Conn: conn}
 			case url.Proto == stun.ProtoTypeTCP && url.Scheme == stun.SchemeTypeTURNS:
+				network = NetworkTypeTCP4.String()
 				tcpAddr, resolvErr := a.net.ResolveTCPAddr(NetworkTypeTCP4.String(), turnServerAddr)
 				if resolvErr != nil {
 					a.log.Warnf("Failed to resolve relay address %s: %v", turnServerAddr, resolvErr)
@@ -644,8 +648,8 @@ func (a *Agent) gatherCandidatesRelay(ctx context.Context, urls []*stun.URI) { /
 					return
 				}
 
-				relAddr = conn.LocalAddr().(*net.TCPAddr).IP.String() //nolint:forcetypeassert
-				relPort = conn.LocalAddr().(*net.TCPAddr).Port        //nolint:forcetypeassert
+				relatedAddr = conn.LocalAddr().(*net.TCPAddr).IP.String() //nolint:forcetypeassert
+				relatedPort = conn.LocalAddr().(*net.TCPAddr).Port        //nolint:forcetypeassert
 				relayProtocol = relayProtocolTLS
 				locConn = turn.NewSTUNConn(conn)
 			default:
@@ -653,68 +657,198 @@ func (a *Agent) gatherCandidatesRelay(ctx context.Context, urls []*stun.URI) { /
 				return
 			}
 
-			client, err := turn.NewClient(&turn.ClientConfig{
-				TURNServerAddr: turnServerAddr,
-				Conn:           locConn,
-				Username:       url.Username,
-				Password:       url.Password,
-				LoggerFactory:  a.loggerFactory,
-				Net:            a.net,
-			})
-			if err != nil {
-				closeConnAndLog(locConn, a.log, "failed to create new TURN client %s %s", turnServerAddr, err)
-				return
-			}
-
-			if err = client.Listen(); err != nil {
-				client.Close()
-				closeConnAndLog(locConn, a.log, "failed to listen on TURN client %s %s", turnServerAddr, err)
-				return
-			}
-
-			relayConn, err := client.Allocate()
-			if err != nil {
-				client.Close()
-				closeConnAndLog(locConn, a.log, "failed to allocate on TURN client %s %s", turnServerAddr, err)
-				return
-			}
-
-			rAddr := relayConn.LocalAddr().(*net.UDPAddr) //nolint:forcetypeassert
-			relayConfig := CandidateRelayConfig{
-				Network:       network,
-				Component:     ComponentRTP,
-				Address:       rAddr.IP.String(),
-				Port:          rAddr.Port,
-				RelAddr:       relAddr,
-				RelPort:       relPort,
-				RelayProtocol: relayProtocol,
-				OnClose: func() error {
-					client.Close()
-					return locConn.Close()
-				},
-			}
-			relayConnClose := func() {
-				if relayConErr := relayConn.Close(); relayConErr != nil {
-					a.log.Warnf("Failed to close relay %v", relayConErr)
-				}
-			}
-			candidate, err := NewCandidateRelay(&relayConfig)
-			if err != nil {
-				relayConnClose()
-
-				client.Close()
-				closeConnAndLog(locConn, a.log, "failed to create relay candidate: %s %s: %v", network, rAddr.String(), err)
-				return
-			}
-
-			if err := a.addCandidate(ctx, candidate, relayConn); err != nil {
-				relayConnClose()
-
-				if closeErr := candidate.close(); closeErr != nil {
-					a.log.Warnf("Failed to close candidate: %v", closeErr)
-				}
-				a.log.Warnf("Failed to append to localCandidates and run onCandidateHdlr: %v", err)
+			// String match. Careful about tcp4 and tcp6 values
+			if relayProtocol == tcp && a.useTCPAllocationsForLocalRelayCandidates {
+				a.createPassiveTCPRelayCandidate(ctx, network, turnServerAddr, locConn, url, relatedAddr, relatedPort)
+			} else {
+				a.createUDPRelayCandidate(ctx, network, turnServerAddr, locConn, url, relatedAddr, relatedPort, relayProtocol)
 			}
 		}(*urls[i])
+	}
+}
+
+func (a *Agent) createPassiveTCPRelayCandidate(
+	ctx context.Context, network, turnServerAddr string, locConn net.PacketConn, url stun.URI,
+	relatedAddr string, relatedPort int) {
+
+	client, err := turn.NewClient(&turn.ClientConfig{
+		TURNServerAddr: turnServerAddr,
+		Conn:           locConn,
+		Username:       url.Username,
+		Password:       url.Password,
+		LoggerFactory:  a.loggerFactory,
+		Net:            a.net,
+	})
+	if err != nil {
+		closeConnAndLog(locConn, a.log, "failed to create new TURN client %s %s", turnServerAddr, err)
+		return
+	}
+
+	// Opt to let pion handle in bound messages to the control connection. And inform us via channel
+	// events we can react to. For example, `BindIndication` messages from the relay will write an
+	// event to a channel that `TCPAllocation.AcceptTCPWithConn` pulls from.
+	if err = client.Listen(); err != nil {
+		client.Close()
+		closeConnAndLog(locConn, a.log, "failed to listen on TURN client %s %s", turnServerAddr, err)
+		return
+	}
+
+	// Code starts differing here. Send an AllocateTCP request to learn of the relay
+	// address/port for the remote to TCP dial into.
+	relayAllocation, err := client.AllocateTCP()
+	if err != nil {
+		client.Close()
+		closeConnAndLog(locConn, a.log, "failed to allocate on TURN client %s %s", turnServerAddr, err)
+		return
+	}
+
+	// This `dataConn` is a wrapper for the "data" relay connection we will send/receive data to on
+	// behalf of communicating with a peer.
+	//
+	// Pion uses `net.PacketConn` as the base level for sending data between
+	// peers/relays. PacketConns are unfortunately a UDP abstraction. Therefore pion also has a
+	// `tcpPacketConn` for turning a `net.Conn` into a `net.PacketConn`.
+	//
+	// These `tcpPacketConn`s internally keep a map of TCP connections. We'll only create one entry
+	// in this map (first "caller" wins).
+	dataConn := newTCPPacketConn(tcpPacketParams{
+		ReadBuffer:  1024, // Number of packets?
+		LocalAddr:   locConn.LocalAddr(),
+		Logger:      a.loggerFactory.NewLogger("tcprelay"),
+		WriteBuffer: 4 * 1024 * 1024, // Number of bytes?
+	})
+
+	go func() {
+		// Wait for a `BindIndication`. And follow that by issuing a `ConnectionBind`
+		// request. Returning the `tcpConn` we can to plain old reads/writes.
+		tcpConn, err := relayAllocation.AcceptTCP()
+		if err != nil {
+			panic(err)
+		}
+
+		// Add the minted `tcpConn` to the `dataConn` that the relay candidate will be mapped to.
+		dataConn.AddConn(tcpConn, nil)
+	}()
+
+	// The `relayAllocation` presumably must be an IP:port value already (as both ends
+	// of a single allocation relay connection must talk to the same relay server). But
+	// just in case we feed the relayAllocation address through a resolution step.
+	relayAddr := relayAllocation.Addr()
+	relayTCPAddr, err := net.ResolveTCPAddr("tcp", relayAddr.String())
+	if err != nil {
+		client.Close()
+		closeConnAndLog(locConn, a.log, "failed to resolve relay address %s %s", relayAddr, err)
+		return
+	}
+
+	relayConfig := CandidateRelayConfig{
+		Network:         network,
+		Component:       ComponentRTP,
+		Address:         relayTCPAddr.IP.String(),
+		Port:            relayTCPAddr.Port,
+		RelAddr:         relatedAddr,
+		RelPort:         relatedPort,
+		TURNControlConn: client,
+		// Dan: We force TCPTypePassive here by choice. Maybe SimultaneousOpen is valid as well? We
+		// certainly expect to only succeed via the other peer dialing out to the relay. But if we
+		// have firewall/nat limitations on the TURN server, simultaneous open may have an
+		// advantage? Can certainly experiment here at a later date.
+		TCPType:       TCPTypePassive,
+		RelayProtocol: tcp,
+		OnClose: func() error {
+			relayAllocation.Close()
+			client.Close()
+			locConn.Close()
+			return nil
+		},
+	}
+
+	// If we do not succeed in adding this candidate, we must clean up
+	relayConnClose := func() {
+		if relayConErr := relayAllocation.Close(); relayConErr != nil {
+			a.log.Warnf("Failed to close relay %v", relayConErr)
+		}
+	}
+
+	candidate, err := NewCandidateRelay(&relayConfig)
+	if err != nil {
+		relayConnClose()
+		client.Close()
+		closeConnAndLog(locConn, a.log, "failed to create relay candidate: %s %s: %v", network, relayAddr.String(), err)
+		return
+	}
+
+	if err := a.addCandidate(ctx, candidate, dataConn); err != nil {
+		relayConnClose()
+		if closeErr := candidate.close(); closeErr != nil {
+			a.log.Warnf("Failed to close candidate: %v", closeErr)
+		}
+		a.log.Warnf("Failed to append to localCandidates and run onCandidateHdlr: %v", err)
+	}
+}
+
+func (a *Agent) createUDPRelayCandidate(
+	ctx context.Context, network, turnServerAddr string, locConn net.PacketConn, url stun.URI,
+	relatedAddr string, relatedPort int, relayProtocol string) {
+
+	client, err := turn.NewClient(&turn.ClientConfig{
+		TURNServerAddr: turnServerAddr,
+		Conn:           locConn,
+		Username:       url.Username,
+		Password:       url.Password,
+		LoggerFactory:  a.loggerFactory,
+		Net:            a.net,
+	})
+	if err != nil {
+		closeConnAndLog(locConn, a.log, "failed to create new TURN client %s %s", turnServerAddr, err)
+		return
+	}
+
+	if err = client.Listen(); err != nil {
+		client.Close()
+		closeConnAndLog(locConn, a.log, "failed to listen on TURN client %s %s", turnServerAddr, err)
+		return
+	}
+
+	relayConn, err := client.Allocate()
+	if err != nil {
+		client.Close()
+		closeConnAndLog(locConn, a.log, "failed to allocate on TURN client %s %s", turnServerAddr, err)
+		return
+	}
+
+	relayAddr := relayConn.LocalAddr().(*net.UDPAddr) //nolint:forcetypeassert
+	relayConfig := CandidateRelayConfig{
+		Network:       network,
+		Component:     ComponentRTP,
+		Address:       relayAddr.IP.String(),
+		Port:          relayAddr.Port,
+		RelAddr:       relatedAddr,
+		RelPort:       relatedPort,
+		RelayProtocol: relayProtocol,
+		OnClose: func() error {
+			client.Close()
+			return locConn.Close()
+		},
+	}
+	relayConnClose := func() {
+		if relayConErr := relayConn.Close(); relayConErr != nil {
+			a.log.Warnf("Failed to close relay %v", relayConErr)
+		}
+	}
+	candidate, err := NewCandidateRelay(&relayConfig)
+	if err != nil {
+		relayConnClose()
+		client.Close()
+		closeConnAndLog(locConn, a.log, "failed to create relay candidate: %s %s: %v", network, relayAddr.String(), err)
+		return
+	}
+
+	if err := a.addCandidate(ctx, candidate, relayConn); err != nil {
+		relayConnClose()
+		if closeErr := candidate.close(); closeErr != nil {
+			a.log.Warnf("Failed to close candidate: %v", closeErr)
+		}
+		a.log.Warnf("Failed to append to localCandidates and run onCandidateHdlr: %v", err)
 	}
 }

@@ -156,6 +156,8 @@ type Agent struct {
 	proxyDialer proxy.Dialer
 
 	enableUseCandidateCheckPriority bool
+
+	useTCPAllocationsForLocalRelayCandidates bool
 }
 
 type task struct {
@@ -328,6 +330,8 @@ func NewAgent(config *AgentConfig) (*Agent, error) { //nolint:gocognit
 		userBindingRequestHandler: config.BindingRequestHandler,
 
 		enableUseCandidateCheckPriority: config.EnableUseCandidateCheckPriority,
+
+		useTCPAllocationsForLocalRelayCandidates: config.UseTCPAllocationsForLocalRelayCandidates,
 	}
 	a.connectionStateNotifier = &handlerNotifier{connectionStateFunc: a.onConnectionStateChange, done: make(chan struct{})}
 	a.candidateNotifier = &handlerNotifier{candidateFunc: a.onCandidate, done: make(chan struct{})}
@@ -594,6 +598,27 @@ func (a *Agent) getBestValidCandidatePair() *CandidatePair {
 }
 
 func (a *Agent) addPair(local, remote Candidate) *CandidatePair {
+	if local.Type() == CandidateTypeRelay && local.NetworkType().IsTCP() {
+		// Creating permissions means informing the TURN Server that the provided IP (the remote
+		// peer) is permitted to send it data.
+		//
+		// The TURN client, in an attempt to be convenient, will lazily create permissions as this
+		// local ICE agent attempts to write data to remote candidates.
+		//
+		// However, in the TCP allocation world, the other peer is going to initiate dialing to the
+		// relay allocation; for the purpose of minimizing conflict from firewalls. Those connection
+		// attempts will not ultimately succeed until permissions have been granted. Hence an
+		// explicit `CreatePermission` call when we add possible candidate pair for our local TCP
+		// relay candidate.
+		local.(*CandidateRelay).CreatePermission(remote.addr())
+	}
+
+	// TCP Candidates with TCP type active will probe server passive ones, so no need to do anything
+	// with them.
+	if remote.TCPType() == TCPTypeActive {
+		return nil
+	}
+
 	p := newCandidatePair(local, remote, a.isControlling)
 	a.checklist = append(a.checklist, p)
 	return p
@@ -657,13 +682,6 @@ func (a *Agent) checkKeepalive() {
 // AddRemoteCandidate adds a new remote candidate
 func (a *Agent) AddRemoteCandidate(c Candidate) error {
 	if c == nil {
-		return nil
-	}
-
-	// TCP Candidates with TCP type active will probe server passive ones, so
-	// no need to do anything with them.
-	if c.TCPType() == TCPTypeActive {
-		a.log.Infof("Ignoring remote candidate with tcpType active: %s", c)
 		return nil
 	}
 
