@@ -4,7 +4,6 @@
 package ice
 
 import (
-	"fmt"
 	"net"
 )
 
@@ -30,7 +29,6 @@ type CandidateServerReflexiveConfig struct {
 // NewCandidateServerReflexive creates a new server reflective candidate
 func NewCandidateServerReflexive(config *CandidateServerReflexiveConfig) (*CandidateServerReflexive, error) {
 	ip := net.ParseIP(config.Address)
-	fmt.Println("Parsing:", config.Address)
 	if ip == nil {
 		return nil, ErrAddressParseFailed
 	}

@@ -46,8 +46,8 @@ func passiveTCPRelayGatherAndExchangeCandidates(agentWithRelay, agentNoRelay *Ag
 		} else {
 			if candidate.TCPType() != TCPTypeUnspecified {
 				ip := net.ParseIP(candidate.Address()).To4()
-				fmt.Println("Parsing:", candidate.Address(), "IP:", ip)
-				fmt.Println("Doneing:", candidate.Marshal(), "Private?", ip.IsPrivate(), "ip[0]", int(ip[0]))
+				// Wait for a "real" external IP to appear. Avoid private IPs (e.g: 192.168.x.y) and
+				// tailscale (100.x.y.z).
 				if !ip.IsPrivate() && ip[0] != 100 {
 					tcpCandidateCreated.Done()
 				}
@@ -121,17 +121,12 @@ func TestRelayTCPConnection(t *testing.T) {
 			{
 				Scheme: stun.SchemeTypeTURN,
 
-				Host:     "34.9.65.195",
-				Username: "calamity",
-				Password: "mD2nNWk9uAguCnWUffUP",
-
-				// Host:     "127.0.0.1",
-				// Username: "dan",
-				// Password: "dan",
+				Host:     "127.0.0.1",
+				Username: "dan",
+				Password: "dan",
 
 				Port:  3478,
 				Proto: stun.ProtoTypeTCP,
-				// Proto: stun.ProtoTypeUDP,
 			},
 		},
 		CandidateTypes: []CandidateType{CandidateTypeRelay},
@@ -159,7 +154,7 @@ func TestRelayTCPConnection(t *testing.T) {
 		Urls: []*stun.URI{
 			{
 				Scheme: stun.SchemeTypeSTUN,
-				Host:   "34.9.65.195",
+				Host:   "turn.viam.com",
 				Port:   3478,
 				Proto:  stun.ProtoTypeUDP,
 			},
@@ -167,6 +162,10 @@ func TestRelayTCPConnection(t *testing.T) {
 
 		// Explicitly demonstrate we do not need to generate any local candidates at the gathering
 		// step.
+		//
+		// Note: this is not a proper test for server-reflexive candidates in that
+		// `addRemotePassiveTCPCandidate` will generate `host` candidates that are also capable of
+		// succeeding.
 		CandidateTypes: []CandidateType{},
 	}
 

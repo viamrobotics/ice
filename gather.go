@@ -73,7 +73,6 @@ func (a *Agent) gatherCandidates(ctx context.Context, done chan struct{}) {
 
 	var wg sync.WaitGroup
 	for _, t := range a.candidateTypes {
-		a.log.Infof("DBG. Gathering candidates. Type: %v", t.String())
 		switch t {
 		case CandidateTypeHost:
 			wg.Add(1)
@@ -85,10 +84,8 @@ func (a *Agent) gatherCandidates(ctx context.Context, done chan struct{}) {
 			wg.Add(1)
 			go func() {
 				if a.udpMuxSrflx != nil {
-					a.log.Info("SrflxUDPMux (bad)")
 					a.gatherCandidatesSrflxUDPMux(ctx, a.urls, a.networkTypes)
 				} else {
-					a.log.Infof("Srflx (good) URLs: %v", a.urls)
 					a.gatherCandidatesSrflx(ctx, a.urls, a.networkTypes)
 				}
 				wg.Done()
@@ -96,7 +93,6 @@ func (a *Agent) gatherCandidates(ctx context.Context, done chan struct{}) {
 			if a.extIPMapper != nil && a.extIPMapper.candidateType == CandidateTypeServerReflexive {
 				wg.Add(1)
 				go func() {
-					a.log.Info("SrflxMapped (bad?)")
 					a.gatherCandidatesSrflxMapped(ctx, a.networkTypes)
 					wg.Done()
 				}()
@@ -463,74 +459,9 @@ func (a *Agent) gatherCandidatesSrflx(ctx context.Context, urls []*stun.URI, net
 			go func(url stun.URI, network string) {
 				defer wg.Done()
 
-				if networkType.IsTCP() {
-					// a.createTCPSrflxCandidate(ctx, url, network)
-				} else if networkType.IsUDP() {
-					a.createUDPSrflxCandidate(ctx, url, network)
-				}
-
+				a.createUDPSrflxCandidate(ctx, url, network)
 			}(*urls[i], networkType.String())
 		}
-	}
-}
-
-func (a *Agent) createTCPSrflxCandidate(ctx context.Context, url stun.URI, network string) {
-	hostPort := fmt.Sprintf("%s:%d", url.Host, url.Port)
-	serverAddr, err := a.net.ResolveTCPAddr(network, hostPort)
-	if err != nil {
-		a.log.Debugf("Failed to resolve STUN host: %s %s: %v", network, hostPort, err)
-		return
-	}
-
-	conn, err := listenUDPInPortRange(a.net, a.log, int(a.portMax), int(a.portMin), network, &net.UDPAddr{IP: nil, Port: 0})
-	if err != nil {
-		closeConnAndLog(conn, a.log, "failed to listen for %s: %v", serverAddr.String(), err)
-		return
-	}
-	// If the agent closes midway through the connection
-	// we end it early to prevent close delay.
-	cancelCtx, cancelFunc := context.WithCancel(ctx)
-	defer cancelFunc()
-	go func() {
-		select {
-		case <-cancelCtx.Done():
-			return
-		case <-a.done:
-			a.log.Info("Done. Closing.")
-			_ = conn.Close()
-		}
-	}()
-
-	xorAddr, err := stunx.GetXORMappedAddr(conn, serverAddr, stunGatherTimeout)
-	a.log.Infof("DBG. Stun response. Xor: %v Err: %v", xorAddr, err)
-	if err != nil {
-		closeConnAndLog(conn, a.log, "failed to get server reflexive address %s %s: %v", network, url, err)
-		return
-	}
-
-	ip := xorAddr.IP
-	port := xorAddr.Port
-
-	lAddr := conn.LocalAddr().(*net.UDPAddr) //nolint:forcetypeassert
-	srflxConfig := CandidateServerReflexiveConfig{
-		Network:   network,
-		Address:   ip.String(),
-		Port:      port,
-		Component: ComponentRTP,
-		RelAddr:   lAddr.IP.String(),
-		RelPort:   lAddr.Port,
-	}
-	c, err := NewCandidateServerReflexive(&srflxConfig)
-	if err != nil {
-		closeConnAndLog(conn, a.log, "failed to create server reflexive candidate: %s %s %d: %v", network, ip, port, err)
-		return
-	}
-
-	if err := a.addCandidate(ctx, c, conn); err != nil {
-		if closeErr := c.close(); closeErr != nil {
-			a.log.Warnf("Failed to close candidate: %v", closeErr)
-		}
-		a.log.Warnf("Failed to append to localCandidates and run onCandidateHdlr: %v", err)
 	}
 }
 

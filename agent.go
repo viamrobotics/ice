@@ -611,11 +611,15 @@ func (a *Agent) addPair(local, remote Candidate) *CandidatePair {
 		// explicit `CreatePermission` call when we add possible candidate pair for our local TCP
 		// relay candidate.
 		err := local.(*CandidateRelay).CreatePermission(remote.addr())
-		a.log.Infof("Creating permissions: %v Err: %v", remote.addr(), err)
+		if err != nil {
+			a.log.Warnf("Error creating permissions. RemoteAddress: %v Err: %v", remote.addr(), err)
+		} else {
+			a.log.Debugf("Permissions created successfully. RemoteAddress: %v", remote.addr())
+		}
 	}
 
-	// TCP Candidates with TCP type active will probe server passive ones, so no need to do anything
-	// with them.
+	// TCP Candidates with TCP type active will probe server passive ones. The remote is active,
+	// hence we are passive. Thus, there is no need to add a pair to our checklist and send pings.
 	if remote.TCPType() == TCPTypeActive {
 		return nil
 	}
@@ -702,7 +706,6 @@ func (a *Agent) AddRemoteCandidate(c Candidate) error {
 		return nil
 	}
 
-	a.log.Infof("DBG. Adding remote candidate in ice: %v", c)
 	go func() {
 		if err := a.run(a.context(), func(ctx context.Context, agent *Agent) {
 			// nolint: contextcheck
@@ -753,14 +756,15 @@ func (a *Agent) requestConnectivityCheck() {
 }
 
 func (a *Agent) addRemotePassiveTCPCandidate(remoteCandidate Candidate) {
-	a.log.Infof("Add remote pass tcp candidates. Passive candidate: %v", remoteCandidate.Marshal())
+	a.log.Debugf("A remote passive tcp candidate was added. Adding complementary active tcp candidates. Candidate: %v",
+		remoteCandidate.Marshal())
+
 	localIPs, err := localInterfaces(a.net, a.interfaceFilter, a.ipFilter, []NetworkType{remoteCandidate.NetworkType()}, a.includeLoopback)
 	if err != nil {
 		a.log.Warnf("Failed to iterate local interfaces, host candidates will not be gathered %s", err)
 		return
 	}
 
-	a.log.Infof("DBG. addRemotePassiveTCPCandidate Remote: %v Local ips: %v", remoteCandidate.Marshal(), localIPs)
 	for i := range localIPs {
 		conn := newActiveTCPConn(
 			a.context(),
@@ -791,13 +795,18 @@ func (a *Agent) addRemotePassiveTCPCandidate(remoteCandidate Candidate) {
 		a.localCandidates[localCandidate.NetworkType()] = append(a.localCandidates[localCandidate.NetworkType()], localCandidate)
 		a.candidateNotifier.EnqueueCandidate(localCandidate)
 
-		a.log.Infof("DBG. Adding remote passive pair %v %v", localCandidate.addr(), remoteCandidate.addr())
+		a.log.Debugf("Adding active tcp host candidate. LocalCandidate: %v RemoteCandidate: %v",
+			localCandidate.addr(), remoteCandidate.addr())
 		a.addPair(localCandidate, remoteCandidate)
 	}
 
-	for _, stunUrl := range a.urls {
-		a.log.Infof("MY CODE: %v", stunUrl)
-		client, err := stun.DialURI(stunUrl, &stun.DialConfig{})
+	// Loop through the list of STUN servers to create local active tcp server reflexive candidates
+	// to pair with the remote passive tcp candidate. To keep the list of generated candidates
+	// small, we only make queries until we get a single successful response. We expect further
+	// responses to discover the same external IP address.
+	for _, stunUri := range a.urls {
+		// The `stunUri` can be a STUN or TURN uri. We assume both will respond to `BindRequest`s.
+		client, err := stun.DialURI(stunUri, &stun.DialConfig{})
 		if err != nil {
 			a.log.Infof("dial err: %v", err)
 			continue
@@ -805,31 +814,37 @@ func (a *Agent) addRemotePassiveTCPCandidate(remoteCandidate Candidate) {
 
 		bindRequest, err := stun.Build(stun.BindingRequest, stun.TransactionID)
 		if err != nil {
-			a.log.Infof("bind err: %v", err)
+			a.log.Warnf("Error building bind request: %v", err)
 			continue
 		}
 
 		var srflxAddr net.IP
 		if err := client.Do(bindRequest, func(ev stun.Event) {
 			if ev.Error != nil {
-				a.log.Infof("TCPActive ServerReflexive BindRequest error: %v", ev.Error)
+				a.log.Warnf("TCPActive ServerReflexive BindRequest error: %v", ev.Error)
 				return
 			}
 
 			var addr stun.XORMappedAddress
 			if err = addr.GetFrom(ev.Message); err != nil {
-				a.log.Infof("BindResponse did not have XORMappedAddress: %v", err) //nolint:errorlint
+				a.log.Warnf("BindResponse did not have XORMappedAddress: %v", err) //nolint:errorlint
 				return
 			}
 
 			srflxAddr = addr.IP
-		}); err != nil {
-			a.log.Infof("Client.Do for TCPActive ServerReflexive BindRequest error: %v", err)
+		}); err != nil || srflxAddr == nil {
+			a.log.Warnf("TCPActive ServerReflexive BindRequest error/malformed output. Err: %v Addr: %v",
+				err, srflxAddr)
+			continue
 		}
 
-		a.log.Infof("Have IP: %v", srflxAddr)
+		// Create a connection to the passive tcp remote candidate. This async dials in a loop. This
+		// is necessary in case the remote candidate is a relay candidate. And the other peer must
+		// learn of our IP such that it can invoke `CreatePermissions` on the relay with our
+		// external IP.
 		conn := newActiveTCPConn(
 			a.context(),
+			// Bind on any available local port.
 			net.JoinHostPort(srflxAddr.String(), "0"),
 			net.JoinHostPort(remoteCandidate.Address(), strconv.Itoa(remoteCandidate.Port())),
 			a.log,
@@ -854,21 +869,13 @@ func (a *Agent) addRemotePassiveTCPCandidate(remoteCandidate Candidate) {
 		}
 
 		localCandidate.start(a, conn, a.startedCh)
-		a.localCandidates[localCandidate.NetworkType()] = append(a.localCandidates[localCandidate.NetworkType()], localCandidate)
+		a.localCandidates[localCandidate.NetworkType()] =
+			append(a.localCandidates[localCandidate.NetworkType()], localCandidate)
 		a.candidateNotifier.EnqueueCandidate(localCandidate)
-		a.log.Infof("DBG. Adding remote passive srflx pair %v %v", localCandidate.addr(), remoteCandidate.addr())
+		a.log.Debugf("Adding active tcp srflx candidate. Local: %v Remote: %v",
+			localCandidate.addr(), remoteCandidate.addr())
 		a.addPair(localCandidate, remoteCandidate)
 	}
-
-	// if localCandidates, ok := a.localCandidates[remoteCandidate.NetworkType()]; ok {
-	//  	a.log.Infof("Other local candidates to add as pair: %v", localCandidates)
-	//  	for _, localCandidate := range localCandidates {
-	//  		if localCandidate.Type() == CandidateTypeServerReflexive {
-	//  			a.log.Infof("DBG. Adding srflx candidate as pair: %v", localCandidate)
-	//  			a.addPair(localCandidate, remoteCandidate)
-	//  		}
-	//  	}
-	// }
 }
 
 // addRemoteCandidate assumes you are holding the lock (must be execute using a.run)
@@ -877,7 +884,6 @@ func (a *Agent) addRemoteCandidate(c Candidate) {
 
 	for _, candidate := range set {
 		if candidate.Equal(c) {
-			a.log.Infof("Equal? exiting: %v", c)
 			return
 		}
 	}
@@ -889,7 +895,7 @@ func (a *Agent) addRemoteCandidate(c Candidate) {
 		}
 	}
 
-	a.log.Infof("DBG. Adding pair? %v type: %v disabledTCP: %v", c.addr(), c.TCPType(), a.disableActiveTCP)
+	// If a remote passive TCP candidate is added, we will respond by adding active tcp candidates.
 	if !a.disableActiveTCP && tcpNetworkTypeFound && c.TCPType() == TCPTypePassive {
 		a.addRemotePassiveTCPCandidate(c)
 	}
@@ -899,14 +905,12 @@ func (a *Agent) addRemoteCandidate(c Candidate) {
 
 	if c.TCPType() != TCPTypePassive {
 		if localCandidates, ok := a.localCandidates[c.NetworkType()]; ok {
-			a.log.Infof("Local candidates to add as pair: %v", localCandidates)
 			for _, localCandidate := range localCandidates {
 				a.addPair(localCandidate, c)
 			}
 		}
 	}
 
-	a.log.Infof("DBG. Doing conn checks: %v", c)
 	a.requestConnectivityCheck()
 }
 
