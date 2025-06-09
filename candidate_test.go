@@ -4,6 +4,7 @@
 package ice
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -12,6 +13,52 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCreatedAt(t *testing.T) {
+	ctx := context.Background()
+	agent, err := NewAgent(&AgentConfig{
+		LoggerFactory: logging.NewDefaultLoggerFactory(),
+	})
+	assert.NoError(t, err)
+	hostCand, err := NewCandidateHost(&CandidateHostConfig{
+		Address: "127.0.0.1",
+		Network: "udp",
+	})
+	assert.NoError(t, err)
+	err = agent.addCandidate(ctx, hostCand, nil)
+	assert.NoError(t, err)
+
+	afterLocal := time.Now()
+
+	srflxCand, err := NewCandidateServerReflexive(&CandidateServerReflexiveConfig{
+		Address: "127.0.0.1",
+		Network: "udp",
+	})
+	assert.NoError(t, err)
+
+	err = agent.AddRemoteCandidate(srflxCand)
+	assert.NoError(t, err)
+
+	afterRemote := time.Now()
+
+	// Remote candidates are added async.
+	remoteCandidates, err := agent.GetRemoteCandidates()
+	for len(remoteCandidates) == 0 && time.Since(afterRemote) < 10*time.Second {
+		remoteCandidates, err = agent.GetRemoteCandidates()
+		assert.NoError(t, err)
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.Len(t, remoteCandidates, 1, "Expected a remote candidate to be added")
+
+	assert.Equal(t, hostCand.CreatedAt().UnixNano(), agent.GetLocalCandidatesStats()[0].Timestamp.UnixNano(),
+		"Host candidate ought to have same creation time as from local candidate stats")
+	assert.Equal(t, srflxCand.CreatedAt().UnixNano(), agent.GetRemoteCandidatesStats()[0].Timestamp.UnixNano(),
+		"Srflx candidate ought to have same creation time as from remote candidate stats")
+	assert.Less(t, hostCand.CreatedAt().UnixNano(), afterLocal.UnixNano(),
+		"Host candidate ought to have been timestamped at candidate creation")
+	assert.Less(t, srflxCand.CreatedAt().UnixNano(), afterRemote.UnixNano(),
+		"Remote candidate ought to have been timestamped at candidate creation")
+}
 
 func TestCandidateTypePreference(t *testing.T) {
 	r := require.New(t)
