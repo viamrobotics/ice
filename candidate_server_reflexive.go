@@ -3,7 +3,9 @@
 
 package ice
 
-import "net"
+import (
+	"net"
+)
 
 // CandidateServerReflexive ...
 type CandidateServerReflexive struct {
@@ -21,6 +23,7 @@ type CandidateServerReflexiveConfig struct {
 	Foundation  string
 	RelAddr     string
 	RelPort     int
+	TCPType     TCPType
 }
 
 // NewCandidateServerReflexive creates a new server reflective candidate
@@ -55,6 +58,7 @@ func NewCandidateServerReflexive(config *CandidateServerReflexiveConfig) (*Candi
 				Address: config.RelAddr,
 				Port:    config.RelPort,
 			},
+			tcpType:               config.TCPType,
 			remoteCandidateCaches: map[AddrPort]Candidate{},
 		},
 	}, nil
