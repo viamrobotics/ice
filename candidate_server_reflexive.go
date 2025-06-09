@@ -3,7 +3,10 @@
 
 package ice
 
-import "net"
+import (
+	"net"
+	"time"
+)
 
 // CandidateServerReflexive ...
 type CandidateServerReflexive struct {
@@ -43,6 +46,7 @@ func NewCandidateServerReflexive(config *CandidateServerReflexiveConfig) (*Candi
 	return &CandidateServerReflexive{
 		candidateBase: candidateBase{
 			id:                 candidateID,
+			createdAt:          time.Now(),
 			networkType:        networkType,
 			candidateType:      CandidateTypeServerReflexive,
 			address:            config.Address,

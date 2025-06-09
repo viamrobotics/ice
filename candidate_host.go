@@ -6,6 +6,7 @@ package ice
 import (
 	"net"
 	"strings"
+	"time"
 )
 
 // CandidateHost is a candidate of type host
@@ -38,6 +39,7 @@ func NewCandidateHost(config *CandidateHostConfig) (*CandidateHost, error) {
 	c := &CandidateHost{
 		candidateBase: candidateBase{
 			id:                    candidateID,
+			createdAt:             time.Now(),
 			address:               config.Address,
 			candidateType:         CandidateTypeHost,
 			component:             config.Component,
