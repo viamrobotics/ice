@@ -28,6 +28,7 @@ func TestCreatedAt(t *testing.T) {
 	err = agent.addCandidate(ctx, hostCand, nil)
 	assert.NoError(t, err)
 
+	// Mark the timestamp after the host/local candidate was created/added. For asserting at the end.
 	afterLocal := time.Now()
 
 	srflxCand, err := NewCandidateServerReflexive(&CandidateServerReflexiveConfig{
@@ -39,6 +40,7 @@ func TestCreatedAt(t *testing.T) {
 	err = agent.AddRemoteCandidate(srflxCand)
 	assert.NoError(t, err)
 
+	// Mark the timestamp after the srflx/remote candidate was created/added. For asserting at the end.
 	afterRemote := time.Now()
 
 	// Remote candidates are added async.
