@@ -45,7 +45,12 @@ func passiveTCPRelayGatherAndExchangeCandidates(agentWithRelay, agentNoRelay *Ag
 			wg.Done()
 		} else {
 			if candidate.TCPType() != TCPTypeUnspecified {
-				tcpCandidateCreated.Done()
+				ip := net.ParseIP(candidate.Address()).To4()
+				fmt.Println("Parsing:", candidate.Address(), "IP:", ip)
+				fmt.Println("Doneing:", candidate.Marshal(), "Private?", ip.IsPrivate(), "ip[0]", int(ip[0]))
+				if !ip.IsPrivate() && ip[0] != 100 {
+					tcpCandidateCreated.Done()
+				}
 			}
 		}
 	}))
@@ -69,8 +74,8 @@ func passiveTCPRelayGatherAndExchangeCandidates(agentWithRelay, agentNoRelay *Ag
 	// Assert there's a single tcp candidate. And add it as a remote candidate for `agentWithRelay`.
 	tcpCandidates, err := agentNoRelay.GetLocalCandidates()
 	check(err)
-	if len(tcpCandidates) != 1 {
-		check(fmt.Errorf("Expected 1 TCP candidate. Found: %d", len(tcpCandidates)))
+	if len(tcpCandidates) < 1 {
+		check(fmt.Errorf("Expected at least 1 TCP candidate. Found: %d", len(tcpCandidates)))
 	}
 
 	for _, c := range tcpCandidates {
@@ -114,12 +119,19 @@ func TestRelayTCPConnection(t *testing.T) {
 		NetworkTypes: []NetworkType{NetworkTypeTCP4},
 		Urls: []*stun.URI{
 			{
-				Scheme:   stun.SchemeTypeTURN,
-				Host:     "127.0.0.1",
-				Username: "dan",
-				Password: "dan",
-				Port:     3478,
-				Proto:    stun.ProtoTypeTCP,
+				Scheme: stun.SchemeTypeTURN,
+
+				Host:     "34.9.65.195",
+				Username: "calamity",
+				Password: "mD2nNWk9uAguCnWUffUP",
+
+				// Host:     "127.0.0.1",
+				// Username: "dan",
+				// Password: "dan",
+
+				Port:  3478,
+				Proto: stun.ProtoTypeTCP,
+				// Proto: stun.ProtoTypeUDP,
 			},
 		},
 		CandidateTypes: []CandidateType{CandidateTypeRelay},
@@ -144,16 +156,18 @@ func TestRelayTCPConnection(t *testing.T) {
 	// generated in response to a passive TCP remote candidate.
 	cfgNoTURN := &AgentConfig{
 		NetworkTypes: []NetworkType{NetworkTypeTCP4},
+		Urls: []*stun.URI{
+			{
+				Scheme: stun.SchemeTypeSTUN,
+				Host:   "34.9.65.195",
+				Port:   3478,
+				Proto:  stun.ProtoTypeUDP,
+			},
+		},
 
 		// Explicitly demonstrate we do not need to generate any local candidates at the gathering
 		// step.
 		CandidateTypes: []CandidateType{},
-
-		// For simplicity/minimizing noise, we only want to create a localhost candidate.
-		IncludeLoopback: true,
-		IPFilter: func(addr net.IP) bool {
-			return addr.IsLoopback()
-		},
 	}
 
 	agentNoTURN, err := NewAgent(cfgNoTURN)

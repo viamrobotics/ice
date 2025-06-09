@@ -47,9 +47,9 @@ func newActiveTCPConn(ctx context.Context, localAddress, remoteAddress string, l
 
 	laddr, err := getTCPAddrOnInterface(localAddress)
 	if err != nil {
-		atomic.StoreInt32(&a.closed, 1)
-		log.Infof("Failed to dial TCP address %s: %v", remoteAddress, err)
-		return
+		// atomic.StoreInt32(&a.closed, 1)
+		log.Infof("Failed to dial TCP address. Assuming srflx %s: %v", remoteAddress, err)
+		// return
 	}
 
 	// Spin off a goroutine that will:
@@ -128,7 +128,12 @@ func newActiveTCPConn(ctx context.Context, localAddress, remoteAddress string, l
 			}
 
 			if connPtr == nil || err != nil {
-				log.Infof("Failed to write streaming packet. Redialing: %s", err)
+				if connPtr == nil {
+					log.Infof("Failed to write streaming packet. Nil conn")
+				} else {
+					log.Infof("Failed to write streaming packet. Redialing: %s", err)
+				}
+
 				if connPtr != nil {
 					(*connPtr).Close()
 				}
