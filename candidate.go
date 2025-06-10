@@ -31,6 +31,10 @@ type Candidate interface {
 	// Unlike the foundation this is different for each candidate
 	ID() string
 
+	// CreatedAt returns the time that a candidate was created. Either gathered, or received as a
+	// remote candidate.
+	CreatedAt() time.Time
+
 	// A component is a piece of a data stream.
 	// An example is one for RTP, and one for RTCP
 	Component() uint16

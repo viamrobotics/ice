@@ -6,7 +6,10 @@
 //nolint:dupl
 package ice
 
-import "net"
+import (
+	"net"
+	"time"
+)
 
 // CandidatePeerReflexive ...
 type CandidatePeerReflexive struct {
@@ -46,6 +49,7 @@ func NewCandidatePeerReflexive(config *CandidatePeerReflexiveConfig) (*Candidate
 	return &CandidatePeerReflexive{
 		candidateBase: candidateBase{
 			id:                 candidateID,
+			createdAt:          time.Now(),
 			networkType:        networkType,
 			candidateType:      CandidateTypePeerReflexive,
 			address:            config.Address,

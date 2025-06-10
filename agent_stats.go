@@ -118,7 +118,7 @@ func (a *Agent) GetLocalCandidatesStats() []CandidateStats {
 					}
 				}
 				stat := CandidateStats{
-					Timestamp:     time.Now(),
+					Timestamp:     c.CreatedAt(),
 					ID:            c.ID(),
 					NetworkType:   networkType,
 					IP:            c.Address(),
@@ -149,7 +149,7 @@ func (a *Agent) GetRemoteCandidatesStats() []CandidateStats {
 		for networkType, remoteCandidates := range agent.remoteCandidates {
 			for _, c := range remoteCandidates {
 				stat := CandidateStats{
-					Timestamp:     time.Now(),
+					Timestamp:     c.CreatedAt(),
 					ID:            c.ID(),
 					NetworkType:   networkType,
 					IP:            c.Address(),
