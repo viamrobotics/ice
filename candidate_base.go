@@ -20,6 +20,7 @@ import (
 
 type candidateBase struct {
 	id            string
+	createdAt     time.Time
 	networkType   NetworkType
 	candidateType CandidateType
 
@@ -73,6 +74,10 @@ func (c *candidateBase) Value(interface{}) interface{} {
 // ID returns Candidate ID
 func (c *candidateBase) ID() string {
 	return c.id
+}
+
+func (c *candidateBase) CreatedAt() time.Time {
+	return c.createdAt
 }
 
 func (c *candidateBase) Foundation() string {

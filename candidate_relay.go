@@ -5,6 +5,7 @@ package ice
 
 import (
 	"net"
+	"time"
 
 	"github.com/pion/turn/v2"
 )
@@ -63,6 +64,7 @@ func NewCandidateRelay(config *CandidateRelayConfig) (*CandidateRelay, error) {
 	return &CandidateRelay{
 		candidateBase: candidateBase{
 			id:                 candidateID,
+			createdAt:          time.Now(),
 			networkType:        networkType,
 			candidateType:      CandidateTypeRelay,
 			address:            config.Address,

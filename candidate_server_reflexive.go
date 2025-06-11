@@ -5,6 +5,7 @@ package ice
 
 import (
 	"net"
+	"time"
 )
 
 // CandidateServerReflexive ...
@@ -46,6 +47,7 @@ func NewCandidateServerReflexive(config *CandidateServerReflexiveConfig) (*Candi
 	return &CandidateServerReflexive{
 		candidateBase: candidateBase{
 			id:                 candidateID,
+			createdAt:          time.Now(),
 			networkType:        networkType,
 			candidateType:      CandidateTypeServerReflexive,
 			address:            config.Address,
