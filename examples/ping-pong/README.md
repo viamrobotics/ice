@@ -2,7 +2,7 @@
 
 This example demonstrates how to connect two peers via ICE. Once started they send the current time between each other.
 
-Currently this example exchanges candidates over a HTTP server running on localhost. In a real world setup `pion/ice` will typically
+Currently this example exchanges candidates over a HTTP server running on localhost. In a real world setup `viamrobotics/ice` will typically
 exchange auth and candidates via a signaling server.
 
 ## Instruction

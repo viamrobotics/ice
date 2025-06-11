@@ -18,8 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	atomicx "github.com/pion/ice/v2/internal/atomic"
-	stunx "github.com/pion/ice/v2/internal/stun"
+	atomicx "github.com/viamrobotics/ice/v2/internal/atomic"
+	stunx "github.com/viamrobotics/ice/v2/internal/stun"
 	"github.com/pion/logging"
 	"github.com/pion/mdns"
 	"github.com/pion/stun"
