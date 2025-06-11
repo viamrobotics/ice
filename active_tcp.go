@@ -35,21 +35,18 @@ type activeTCPConn struct {
 	closed                  int32
 }
 
-// Dan: `localAddress` (specifically the port) is only used for the initial dial. An `activeTCPConn`
-// can redial, for example when the original dial to a relay server succeeds, but the other peer has
-// not yet created permissions. We believe redialing from a different local port is fine because the
-// other end is not verifying the port messages are coming from.
+// Dan: `localAddress` (specifically the port) I believe is non-functional. Being we dial out to the
+// other peer, there's no need to "listen" on our assigned port.
 func newActiveTCPConn(ctx context.Context, localAddress, remoteAddress string, log logging.LeveledLogger) (a *activeTCPConn) {
 	a = &activeTCPConn{
 		readBuffer:  packetio.NewBuffer(),
 		writeBuffer: packetio.NewBuffer(),
 	}
 
+	// On error, `laddr` will be nil, which is fine for the dialer.
 	laddr, err := getTCPAddrOnInterface(localAddress)
 	if err != nil {
-		atomic.StoreInt32(&a.closed, 1)
-		log.Infof("Failed to dial TCP address %s: %v", remoteAddress, err)
-		return
+		log.Infof("Failed to listen on TCP address. Assuming srflx %s: %v", localAddress, err)
 	}
 
 	// Spin off a goroutine that will:
@@ -62,12 +59,17 @@ func newActiveTCPConn(ctx context.Context, localAddress, remoteAddress string, l
 
 		// Create an initial connection object and (ideally) initialize the atomic pointer to it.
 		if conn, err := dialer.DialContext(ctx, "tcp", remoteAddress); err == nil {
+			// The connection may get recreated, particularly during the connection process. The
+			// "write" loop owns redialing and communicates to the "read" loop via this
+			// `activeTCPConn.conn` member variable.
 			a.conn.Store(&conn)
 		} else {
 			log.Infof("Failed to dial TCP address %s: %v", remoteAddress, err)
 		}
 
 		defer func() {
+			// This outer goroutine represents the "write" loop. When the write loop exits, we will
+			// consider the connection closed. And signal the "read" loop to exit.
 			atomic.StoreInt32(&a.closed, 1)
 			connPtr := a.conn.Load()
 			if connPtr != nil {
@@ -91,7 +93,7 @@ func newActiveTCPConn(ctx context.Context, localAddress, remoteAddress string, l
 
 				n, err := readStreamingPacket(*connPtr, buff)
 				if err != nil {
-					log.Infof("Failed to read streaming packet: %s", err)
+					log.Debugf("Failed to read streaming packet: %s", err)
 					time.Sleep(10 * time.Millisecond)
 					continue
 				}
@@ -99,7 +101,7 @@ func newActiveTCPConn(ctx context.Context, localAddress, remoteAddress string, l
 				if _, err := a.readBuffer.Write(buff[:n]); err != nil {
 					// The `readBuffer` has a 1:1 lifetime with respect to the `activeTCPConn`. If
 					// this in-memory operation fails, we can only bail.
-					log.Infof("Failed to write to buffer: %s", err)
+					log.Warnf("Failed to write to buffer: %s", err)
 					break
 				}
 			}
@@ -110,9 +112,9 @@ func newActiveTCPConn(ctx context.Context, localAddress, remoteAddress string, l
 		for atomic.LoadInt32(&a.closed) == 0 {
 			toWrite, err := a.writeBuffer.Read(buff)
 			if err != nil {
-				log.Infof("Failed to read from buffer: %s", err)
 				// The `writeBuffer` has a 1:1 lifetime with respect to the `activeTCPConn`. If
 				// this in-memory operation fails, we can only bail.
+				log.Warnf("Failed to read from buffer: %s", err)
 				break
 			}
 
@@ -127,21 +129,30 @@ func newActiveTCPConn(ctx context.Context, localAddress, remoteAddress string, l
 				_, err = writeStreamingPacket(*connPtr, buff[:toWrite])
 			}
 
-			if connPtr == nil || err != nil {
-				log.Infof("Failed to write streaming packet. Redialing: %s", err)
-				if connPtr != nil {
-					(*connPtr).Close()
-				}
-
-				newConn, err := dialer.DialContext(ctx, "tcp", remoteAddress)
-				if err != nil {
-					log.Infof("Failed to dial TCP address %s: %v", remoteAddress, err)
-					continue
-				}
-
-				connPtr = &newConn
-				a.conn.Store(connPtr)
+			// If we had a connection and writing bytes did not result in an error. We're
+			// good. Otherwise reconnect.
+			if connPtr != nil && err == nil {
+				continue
 			}
+
+			if connPtr == nil {
+				log.Debugf("Failed to write streaming packet. Nil conn.")
+			} else {
+				log.Debugf("Failed to write streaming packet. Redialing: %s", err)
+			}
+
+			if connPtr != nil {
+				(*connPtr).Close()
+			}
+
+			newConn, err := dialer.DialContext(ctx, "tcp", remoteAddress)
+			if err != nil {
+				log.Debugf("Failed to dial TCP address %s: %v", remoteAddress, err)
+				continue
+			}
+
+			connPtr = &newConn
+			a.conn.Store(connPtr)
 		}
 	}()
 
