@@ -276,7 +276,13 @@ func (s *controlledSelector) HandleBindingRequest(m *stun.Message, local, remote
 			if selectedPair == nil || (selectedPair != p && (!s.agent.needsToCheckPriorityOnNominated() || selectedPair.priority() <= p.priority())) {
 				s.agent.setSelectedPair(p)
 			} else if selectedPair != p {
-				s.log.Tracef("Ignore nominate new pair %s, already nominated pair %s", p, selectedPair)
+				s.log.Tracef("Accept new nominated pair %s, previous nominated pair %s", p, selectedPair)
+				// RSDK-11062: Chrome can nominate new pairs with lower priorities. It claims to do
+				// this to avoid needing an ICE restart when an existing candidate pair is no longer
+				// available (e.g: switching from wifi to wireless). But we've observed this state
+				// being hit shortly after connecting where a nominally lower priority pair was
+				// nominated. Resulting in a "disconnected" peer connection.
+				s.agent.setSelectedPair(p)
 			}
 		} else {
 			// If the received Binding request triggered a new check to be
