@@ -251,7 +251,10 @@ func (s *controlledSelector) HandleSuccessResponse(m *stun.Message, local, remot
 			(selectedPair != p && (!s.agent.needsToCheckPriorityOnNominated() || selectedPair.priority() <= p.priority())) {
 			s.agent.setSelectedPair(p)
 		} else if selectedPair != p {
-			s.log.Tracef("Ignore nominate new pair %s, already nominated pair %s", p, selectedPair)
+			s.log.Tracef("Accept new nominated pair %s, previous nominated pair %s", p, selectedPair)
+			// Dan: See `RSDK-11062` note below. This code path was not originally observed. But I
+			// expect we want the same result as below.
+			s.agent.setSelectedPair(p)
 		}
 	}
 
