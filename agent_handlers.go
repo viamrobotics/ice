@@ -3,7 +3,10 @@
 
 package ice
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // OnConnectionStateChange sets a handler that is fired when the connection state changes
 func (a *Agent) OnConnectionStateChange(f func(ConnectionState)) error {
@@ -45,8 +48,11 @@ func (a *Agent) onConnectionStateChange(s ConnectionState) {
 
 type handlerNotifier struct {
 	sync.Mutex
-	running   bool
-	notifiers sync.WaitGroup
+	running bool
+
+	notifiers       sync.WaitGroup
+	notifiersCtx    context.Context
+	notifiersCancel context.CancelFunc
 
 	connectionStates    []ConnectionState
 	connectionStateFunc func(ConnectionState)
@@ -56,38 +62,44 @@ type handlerNotifier struct {
 
 	selectedCandidatePairs []*CandidatePair
 	candidatePairFunc      func(*CandidatePair)
+}
 
-	// State for closing
-	done chan struct{}
+// Creates a new handler notifier. Only one of the passed-in callbacks should be
+// specified.
+func newHandlerNotifier(
+	connectionStateFunc func(ConnectionState),
+	candidateFunc func(Candidate),
+	candidatePairFunc func(*CandidatePair),
+) *handlerNotifier {
+	notifiersCtx, notifiersCancel := context.WithCancel(context.Background())
+	return &handlerNotifier{
+		notifiersCtx:        notifiersCtx,
+		notifiersCancel:     notifiersCancel,
+		connectionStateFunc: connectionStateFunc,
+		candidateFunc:       candidateFunc,
+		candidatePairFunc:   candidatePairFunc,
+	}
 }
 
 func (h *handlerNotifier) Close(graceful bool) {
-	if graceful {
-		// if we were closed ungracefully before, we now
-		// want ot wait.
-		defer h.notifiers.Wait()
-	}
-
 	h.Lock()
-
-	select {
-	case <-h.done:
+	if h.notifiersCtx.Err() != nil {
 		h.Unlock()
 		return
-	default:
 	}
-	close(h.done)
+	h.notifiersCancel()
 	h.Unlock()
+
+	if graceful {
+		h.notifiers.Wait()
+	}
 }
 
 func (h *handlerNotifier) EnqueueConnectionState(s ConnectionState) {
 	h.Lock()
-	defer h.Unlock()
-
-	select {
-	case <-h.done:
+	if h.notifiersCtx.Err() != nil {
+		h.Unlock()
 		return
-	default:
 	}
 
 	notify := func() {
@@ -110,18 +122,19 @@ func (h *handlerNotifier) EnqueueConnectionState(s ConnectionState) {
 	if !h.running {
 		h.running = true
 		h.notifiers.Add(1)
+		h.Unlock()
+
 		go notify()
+	} else {
+		h.Unlock()
 	}
 }
 
 func (h *handlerNotifier) EnqueueCandidate(c Candidate) {
 	h.Lock()
-	defer h.Unlock()
-
-	select {
-	case <-h.done:
+	if h.notifiersCtx.Err() != nil {
+		h.Unlock()
 		return
-	default:
 	}
 
 	notify := func() {
@@ -144,18 +157,19 @@ func (h *handlerNotifier) EnqueueCandidate(c Candidate) {
 	if !h.running {
 		h.running = true
 		h.notifiers.Add(1)
+		h.Unlock()
+
 		go notify()
+	} else {
+		h.Unlock()
 	}
 }
 
 func (h *handlerNotifier) EnqueueSelectedCandidatePair(p *CandidatePair) {
 	h.Lock()
-	defer h.Unlock()
-
-	select {
-	case <-h.done:
+	if h.notifiersCtx.Err() != nil {
+		h.Unlock()
 		return
-	default:
 	}
 
 	notify := func() {
@@ -170,6 +184,7 @@ func (h *handlerNotifier) EnqueueSelectedCandidatePair(p *CandidatePair) {
 			notification := h.selectedCandidatePairs[0]
 			h.selectedCandidatePairs = h.selectedCandidatePairs[1:]
 			h.Unlock()
+
 			h.candidatePairFunc(notification)
 		}
 	}
@@ -178,6 +193,10 @@ func (h *handlerNotifier) EnqueueSelectedCandidatePair(p *CandidatePair) {
 	if !h.running {
 		h.running = true
 		h.notifiers.Add(1)
+		h.Unlock()
+
 		go notify()
+	} else {
+		h.Unlock()
 	}
 }

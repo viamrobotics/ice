@@ -18,8 +18,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	atomicx "github.com/viamrobotics/ice/v2/internal/atomic"
-	stunx "github.com/viamrobotics/ice/v2/internal/stun"
 	"github.com/pion/logging"
 	"github.com/pion/mdns"
 	"github.com/pion/stun"
@@ -27,6 +25,8 @@ import (
 	"github.com/pion/transport/v2/packetio"
 	"github.com/pion/transport/v2/stdnet"
 	"github.com/pion/transport/v2/vnet"
+	atomicx "github.com/viamrobotics/ice/v2/internal/atomic"
+	stunx "github.com/viamrobotics/ice/v2/internal/stun"
 	"golang.org/x/net/proxy"
 )
 
@@ -333,9 +333,10 @@ func NewAgent(config *AgentConfig) (*Agent, error) { //nolint:gocognit
 
 		useTCPAllocationsForLocalRelayCandidates: config.UseTCPAllocationsForLocalRelayCandidates,
 	}
-	a.connectionStateNotifier = &handlerNotifier{connectionStateFunc: a.onConnectionStateChange, done: make(chan struct{})}
-	a.candidateNotifier = &handlerNotifier{candidateFunc: a.onCandidate, done: make(chan struct{})}
-	a.selectedCandidatePairNotifier = &handlerNotifier{candidatePairFunc: a.onSelectedCandidatePairChange, done: make(chan struct{})}
+
+	a.connectionStateNotifier = newHandlerNotifier(a.onConnectionStateChange, nil, nil)
+	a.candidateNotifier = newHandlerNotifier(nil, a.onCandidate, nil)
+	a.selectedCandidatePairNotifier = newHandlerNotifier(nil, nil, a.onSelectedCandidatePairChange)
 
 	if a.net == nil {
 		a.net, err = stdnet.NewNet()
