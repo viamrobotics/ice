@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/pion/dtls/v2"
-	"github.com/viamrobotics/ice/v2/internal/fakenet"
-	stunx "github.com/viamrobotics/ice/v2/internal/stun"
 	"github.com/pion/logging"
 	"github.com/pion/stun"
 	"github.com/pion/turn/v2"
+	"github.com/viamrobotics/ice/v2/internal/fakenet"
+	stunx "github.com/viamrobotics/ice/v2/internal/stun"
 )
 
 const (
@@ -727,7 +727,9 @@ func (a *Agent) createPassiveTCPRelayCandidate(
 		// request. Returning the `tcpConn` we can to plain old reads/writes.
 		tcpConn, err := relayAllocation.AcceptTCP()
 		if err != nil {
-			panic(err)
+			client.Close()
+			closeConnAndLog(locConn, a.log, "failed to accept tcp connection on relay allocation %s", err)
+			return
 		}
 
 		// Add the minted `tcpConn` to the `dataConn` that the relay candidate will be mapped to.
