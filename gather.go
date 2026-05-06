@@ -665,7 +665,7 @@ func (a *Agent) gatherCandidatesRelay(ctx context.Context, urls []*stun.URI) { /
 			if relayProtocol == tcp && a.useTCPAllocationsForLocalRelayCandidates {
 				a.createPassiveTCPRelayCandidate(ctx, turnServerAddr, locConn, url, relatedAddr, relatedPort)
 			} else {
-				a.createUDPRelayCandidate(ctx, turnServerAddr, locConn, url, relatedAddr, relatedPort)
+				a.createUDPRelayCandidate(ctx, turnServerAddr, locConn, url, relayProtocol, relatedAddr, relatedPort)
 			}
 		}(*urls[i])
 	}
@@ -795,7 +795,7 @@ func (a *Agent) createPassiveTCPRelayCandidate(
 
 func (a *Agent) createUDPRelayCandidate(
 	ctx context.Context, turnServerAddr string, locConn net.PacketConn, url stun.URI,
-	relatedAddr string, relatedPort int) {
+	relayProtocol, relatedAddr string, relatedPort int) {
 
 	client, err := turn.NewClient(&turn.ClientConfig{
 		TURNServerAddr: turnServerAddr,
@@ -831,7 +831,7 @@ func (a *Agent) createUDPRelayCandidate(
 		Port:          relayAddr.Port,
 		RelAddr:       relatedAddr,
 		RelPort:       relatedPort,
-		RelayProtocol: udp,
+		RelayProtocol: relayProtocol,
 		OnClose: func() error {
 			client.Close()
 			return locConn.Close()
